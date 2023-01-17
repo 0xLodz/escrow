@@ -1,9 +1,7 @@
-import { ethers } from 'ethers';
-import { useEffect, useState } from 'react';
-import deploy from './deploy';
-import Escrow from './Escrow';
-
-const provider = new ethers.providers.Web3Provider(window.ethereum);
+import { ethers } from "ethers";
+import { useEffect, useState, useRef } from "react";
+import deploy from "./deploy";
+import Escrow from "./Escrow";
 
 export async function approve(escrowContract, signer) {
   const approveTxn = await escrowContract.connect(signer).approve();
@@ -12,46 +10,21 @@ export async function approve(escrowContract, signer) {
 
 function App() {
   const [escrows, setEscrows] = useState([]);
-  const [account, setAccount] = useState();
-  const [signer, setSigner] = useState();
+  const providerRef = useRef(
+    new ethers.providers.Web3Provider(window.ethereum)
+  );
+  const signerRef = useRef(null);
+  const arbiterRef = useRef(null);
+  const beneficiaryRef = useRef(null);
+  const weiRef = useRef(null);
 
   useEffect(() => {
-    async function getAccounts() {
-      const accounts = await provider.send('eth_requestAccounts', []);
-
-      setAccount(accounts[0]);
-      setSigner(provider.getSigner());
-    }
-
-    getAccounts();
-  }, [account]);
-
-  async function newContract() {
-    const beneficiary = document.getElementById('beneficiary').value;
-    const arbiter = document.getElementById('arbiter').value;
-    const value = ethers.BigNumber.from(document.getElementById('wei').value);
-    const escrowContract = await deploy(signer, arbiter, beneficiary, value);
-
-
-    const escrow = {
-      address: escrowContract.address,
-      arbiter,
-      beneficiary,
-      value: value.toString(),
-      handleApprove: async () => {
-        escrowContract.on('Approved', () => {
-          document.getElementById(escrowContract.address).className =
-            'complete';
-          document.getElementById(escrowContract.address).innerText =
-            "✓ It's been approved!";
-        });
-
-        await approve(escrowContract, signer);
-      },
-    };
-
-    setEscrows([...escrows, escrow]);
-  }
+    (async function getAccounts() {
+      const provider = providerRef.current;
+      await provider.send("eth_requestAccounts", []);
+      signerRef.current = provider.getSigner();
+    })();
+  }, []);
 
   return (
     <>
@@ -59,17 +32,17 @@ function App() {
         <h1> New Contract </h1>
         <label>
           Arbiter Address
-          <input type="text" id="arbiter" />
+          <input ref={arbiterRef} type="text" />
         </label>
 
         <label>
           Beneficiary Address
-          <input type="text" id="beneficiary" />
+          <input ref={beneficiaryRef} type="text" />
         </label>
 
         <label>
           Deposit Amount (in Wei)
-          <input type="text" id="wei" />
+          <input ref={weiRef} type="text" />
         </label>
 
         <div
@@ -96,6 +69,42 @@ function App() {
       </div>
     </>
   );
+
+  async function newContract() {
+    const signer = signerRef.current;
+    const beneficiary = beneficiaryRef.current.value;
+    const arbiter = arbiterRef.current.value;
+    const value = ethers.BigNumber.from(weiRef.current.value);
+
+    const escrowContract = await deploy(signer, arbiter, beneficiary, value);
+
+    const escrow = {
+      address: escrowContract.address,
+      arbiter,
+      beneficiary,
+      value: value.toString(),
+      approved: false,
+      handleApprove: async (address) => {
+        escrowContract.on("Approved", () => {
+          const approvedEscrowIndex = escrows.findIndex(
+            (escrow) => escrow.address === address
+          );
+          setEscrows([
+            ...escrows.slice(0, approvedEscrowIndex),
+            {
+              ...escrows[approvedEscrowIndex],
+              approved: true,
+            },
+            ...escrows.slice(approvedEscrowIndex + 1),
+          ]);
+        });
+
+        await approve(escrowContract, signer);
+      },
+    };
+
+    setEscrows([...escrows, escrow]);
+  }
 }
 
 export default App;
